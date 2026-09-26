@@ -337,18 +337,19 @@
   let bird = { x:0, y:0, vy:0, r:0, angle:0, shieldFlash:0 };
 
   // Physics
-  const GRAVITY     = () => H * 0.0018;
-  const FLAP_VEL    = () => -H * 0.032;
-  const MAX_FALL    = () =>  H * 0.018;
-  const PIPE_SPEED_BASE = () => W * 0.004;
+  // Units: pixels per second (and per second squared)
+  const GRAVITY     = () => H * 2.4;
+  const FLAP_VEL    = () => -H * 0.72;
+  const MAX_FALL    = () =>  H * 1.1;
+  const PIPE_SPEED_BASE = () => Math.max(W * 0.42, 150);
+  const PIPE_SPACING = () => Math.max(W * 0.62, 230);
+  let distSincePipe = 0;
   let   PIPE_SPEED  = 0;
   const GAP_BASE    = () => H * 0.28;
   const GAP_MIN     = () => H * 0.20;
 
   // Pipes
   let pipes = [];
-  let pipeTimer = 0;
-  const PIPE_INTERVAL = () => Math.round(W * 1.8 / Math.max(PIPE_SPEED, 1));
 
   // Powerup pickups
   let puPickups = [];
@@ -417,7 +418,7 @@
     puPickups = [];
     particles = [];
     scoreStars = [];
-    pipeTimer = PIPE_INTERVAL() * 0.6;
+    distSincePipe = PIPE_SPACING() * 0.4;
     activePU = { shield:null, slow:null, tiny:null, star:null };
     PIPE_SPEED = PIPE_SPEED_BASE();
     updatePUHUD();
@@ -824,7 +825,7 @@
       const p = particles[i];
       p.x += p.vx * dt * 0.05;
       p.y += p.vy * dt * 0.05;
-      p.vy += GRAVITY() * 0.3 * dt * 0.05;
+      p.vy += 0.15 * dt * 0.05;
       p.life -= p.decay * dt * 0.05;
       if (p.life <= 0) { particles.splice(i, 1); continue; }
       ctx.globalAlpha = p.life;
@@ -897,9 +898,13 @@
   let lastTime = 0;
 
   function loop(ts) {
-    if (state === 'dead') { draw(0); return; }
     const dt = Math.min(ts - lastTime, 50);
     lastTime = ts;
+    if (state === 'dead') {
+      draw(dt);
+      if (particles.length) requestAnimationFrame(loop);
+      return;
+    }
 
     update(dt);
     draw(dt);
@@ -909,23 +914,19 @@
 
   function update(dt) {
     if (state !== 'playing') return;
-    const slow = puActive('slow') ? 0.45 : 1;
+    const slow = puActive('slow') ? 0.55 : 1;
+    const s = (dt / 1000) * slow;
 
-    // Bird physics
-    bird.vy = Math.min(bird.vy + GRAVITY() * slow * dt * 0.06, MAX_FALL() * slow * 2);
-    bird.y  += bird.vy * slow * dt * 0.06;
-    bird.angle = clamp(bird.vy / (MAX_FALL() * 2.5), -0.45, 1.1);
-    bird.r = BIRD_BASE_R() * (puActive('tiny') ? 0.55 : 1);
+    bird.vy = Math.min(bird.vy + GRAVITY() * s, MAX_FALL());
+    bird.y  += bird.vy * s;
+    bird.angle = clamp(bird.vy / MAX_FALL(), -0.45, 1.1);
     if (bird.shieldFlash > 0) bird.shieldFlash = Math.max(0, bird.shieldFlash - 0.08 * dt * 0.05);
 
-    // Pipes
-    PIPE_SPEED = PIPE_SPEED_BASE() * (1 + score * 0.012) * slow;
+    PIPE_SPEED = PIPE_SPEED_BASE() * Math.min(1 + score * 0.012, 1.6);
+    const move = PIPE_SPEED * s;
     for (let i = pipes.length - 1; i >= 0; i--) {
       const p = pipes[i];
-      p.x -= PIPE_SPEED * dt * 0.06;
-      if (p.hasPU && !p.puCollected) {
-        // Scroll pu with pipe
-      }
+      p.x -= move;
       // Score
       if (!p.scored && p.x + PIPE_W < bird.x) {
         p.scored = true;
@@ -954,10 +955,10 @@
     }
 
     // Spawn pipes
-    pipeTimer -= dt;
-    if (pipeTimer <= 0) {
+    distSincePipe += move;
+    if (distSincePipe >= PIPE_SPACING()) {
       spawnPipe();
-      pipeTimer = PIPE_INTERVAL();
+      distSincePipe = 0;
     }
 
     // Collision
@@ -989,7 +990,11 @@
 
   canvas.addEventListener('pointerdown', onTap);
   document.addEventListener('keydown', e => {
-    if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); flap(); }
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      e.preventDefault();
+      if (state === 'dead' && !screenGameover.classList.contains('hidden')) btnRetry.click();
+      else flap();
+    }
   });
 
   btnStart.addEventListener('click', () => flap());
